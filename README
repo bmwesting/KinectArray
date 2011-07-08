@@ -1,0 +1,19 @@
+KinectArray: A cross-platform utility and library for modeling and 3D scene capture using natural interface sensor hardware.
+---------------------------------------------------------
+Primary Authors:
+Brandt Westing
+Texas Advanced Computing Center Visualization Laboratory
+
+Greg Johnson
+Texas Advanced Computing Center Visualization Laboratory
+--------------------------------------------------------
+
+Build Requirements:
+  - OpenNI (http://www.openni.org/)
+  - VTK 5.4+ (http://www.vtk.org/)
+  - Kinect Sensor Module for OpenNI:
+     - Linux & Mac & Win32 (https://github.com/avin2/SensorKinect)
+  - PrimeSense Sensor Module for OpenNI:
+     - Windows and Ubuntu Linux (http://www.openni.org/downloadfiles/opennimodules/openni-compliant-hardware-binaries/32-stable)
+
+
