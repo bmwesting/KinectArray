@@ -4,9 +4,6 @@ LDFLAGS+=
 #SDL
 #LDFLAGS+= -lSDL -lSDL_gfx
 
-#freenect
-LDFLAGS+= -lfreenect
-
 #ni
 CXXFLAGS+= -I/usr/include/ni
 LDFLAGS+= -lOpenNI
