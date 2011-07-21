@@ -2,6 +2,8 @@ project(kinectarray)
 
 cmake_minimum_required(VERSION 2.4.0)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-cpp")
+
 # needed for VTK library
 if(COMMAND cmake_policy)
     cmake_policy(SET CMP0003 NEW)
@@ -31,6 +33,8 @@ set(LIBS ${LIBS} OpenNI)
 
 set(SRCS
     src/main.cpp
+    src/SensorDevice.cpp
+    src/DeviceManager.cpp
     src/MainWindow.cpp
     src/worf/coordinate_transform.cpp
     src/worf/log.cpp
