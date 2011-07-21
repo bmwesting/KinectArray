@@ -14,56 +14,83 @@
 #include <vtkCamera.h>
 #include <vtkUnsignedCharArray.h>
 #include <vtkPointData.h>
+#include <vtkRendererCollection.h>
 
 #include <XnCppWrapper.h>
 
-using namespace xn;
+#include "DeviceManager.h"
+#include "SensorDevice.h"
 
-Context context;
-DepthGenerator depthG;
-DepthMetaData depthMD;
-ImageGenerator imageG;
+struct vtkRenderGroup
+{
+	vtkSmartPointer<vtkPolyData> polyData_;
+	vtkSmartPointer<vtkPolyDataMapper> mapper_;
+	vtkSmartPointer<vtkActor> actor_;
+};
 
-vtkSmartPointer<vtkPolyData> polyData;
+DeviceManager* devMan;
+std::vector<CameraDataPacket> cameraDataVector;
+std::vector<vtkRenderGroup> renderGroups;
 vtkSmartPointer<vtkRenderWindow> renwin;
 
-void updatePolyData(const XnDepthPixel* depth, const XnRGB24Pixel* rgb)
+void updatePolyData()
 {
-	vtkSmartPointer<vtkPoints> points = vtkSmartPointer<vtkPoints>::New();
-	vtkSmartPointer<vtkCellArray> cellArray = vtkSmartPointer<vtkCellArray>::New();
-	vtkSmartPointer<vtkUnsignedCharArray> color = vtkSmartPointer<vtkUnsignedCharArray>::New();
-	color->SetName("Color");
-	color->SetNumberOfComponents(3);
 
-	for(int y = 0; y < 480; y++)
+	for(unsigned int i = 0; i < cameraDataVector.size(); i++)
 	{
-		for(int x = 0; x < 640; x++)
+	
+		// need to create a new render group for any new camera device
+		if (renderGroups.size() <= i)
 		{
-			XnDepthPixel d = depth[x+y*640];
-			XnRGB24Pixel c = rgb[x+y*640];
-
-			vtkIdType id;
-			if (d == 0)
-			{
-				id = points->InsertNextPoint(x,y,4096*.3);
-				color->InsertNextTuple3(0,0,0);
-			}
-			else
-			{
-				id = points->InsertNextPoint(x,y,d*.3);
-				color->InsertNextTuple3(c.nRed, c.nGreen, c.nBlue);
-			}
-
-			cellArray->InsertNextCell(1);
-			cellArray->InsertCellPoint(id);
+			vtkRenderGroup renderGroup;
+			renderGroup.polyData_ = vtkSmartPointer<vtkPolyData>::New();
+			renderGroup.mapper_ = vtkSmartPointer<vtkPolyDataMapper>::New();
+			renderGroup.actor_ = vtkSmartPointer<vtkActor>::New();
+			
+			renderGroup.mapper_->SetInput(renderGroup.polyData_);
+			renderGroup.actor_->SetMapper(renderGroup.mapper_);
+			renwin->GetRenderers()->GetFirstRenderer()->AddActor(renderGroup.actor_);
+			
+			renderGroups.push_back(renderGroup);
 		}
+		
+		vtkSmartPointer<vtkPoints> points = vtkSmartPointer<vtkPoints>::New();
+		vtkSmartPointer<vtkCellArray> cellArray = vtkSmartPointer<vtkCellArray>::New();
+		vtkSmartPointer<vtkUnsignedCharArray> color = vtkSmartPointer<vtkUnsignedCharArray>::New();
+		color->SetName("Color");
+		color->SetNumberOfComponents(3);
+	
+		for(int y = 0; y < 480; y++)
+		{
+			for(int x = 0; x < 640; x++)
+			{
+				XnDepthPixel d = cameraDataVector[i].depthMap_[x+y*640];
+				XnRGB24Pixel c = cameraDataVector[i].imageMap_[x+y*640];
+	
+				vtkIdType id;
+				if (d == 0)
+				{
+					id = points->InsertNextPoint(x,y,4096*.3);
+					color->InsertNextTuple3(0,0,0);
+				}
+				else
+				{
+					id = points->InsertNextPoint(x,y,d*.3);
+					color->InsertNextTuple3(c.nRed, c.nGreen, c.nBlue);
+				}
+	
+				cellArray->InsertNextCell(1);
+				cellArray->InsertCellPoint(id);
+			}
+		}
+	
+		renderGroups[i].polyData_->SetPoints(points);
+		renderGroups[i].polyData_->SetVerts(cellArray);
+		renderGroups[i].polyData_->GetPointData()->SetScalars(color);
+		renderGroups[i].polyData_->Modified();
+		renderGroups[i].polyData_->Update();
 	}
 
-	polyData->SetPoints(points);
-	polyData->SetVerts(cellArray);
-	polyData->GetPointData()->SetScalars(color);
-	polyData->Modified();
-	polyData->Update();
 	renwin->Render();
 }
 
@@ -77,54 +104,33 @@ class UpdateData:public vtkCommand
 		}
 		virtual void Execute(vtkObject* caller, unsigned long eid, void* clientdata)
 		{
-			polyData->Initialize();
-			context.WaitOneUpdateAll(depthG);
-			const XnDepthPixel* pDepthMap = depthG.GetDepthMap();
-			const XnRGB24Pixel* pImageMap = imageG.GetRGB24ImageMap();
-			updatePolyData(pDepthMap, pImageMap);
+			//polyData->Initialize();
+			//devMan->GetCameraDataByDeviceIndex(0, &dataPacket);
+			devMan->GetCameraDataForAllDevices(cameraDataVector);
+			updatePolyData();
 		}
 };
 
 int main(int argc, char** argv)
 {
-	context.Init();
-
-	depthG.Create(context);
-	imageG.Create(context);
-
-	XnMapOutputMode mapMode;
-	mapMode.nXRes = XN_VGA_X_RES;
-	mapMode.nYRes = XN_VGA_Y_RES;
-	mapMode.nFPS = 30;
-	depthG.SetMapOutputMode(mapMode);
-	imageG.SetMapOutputMode(mapMode);
-
-	//Align depth image to RGB Camera image
-	XnBool isSupported = depthG.IsCapabilitySupported("AlternativeViewPoint");
-
-	if(TRUE == isSupported)
+	
+	devMan = new DeviceManager();
+	
+	unsigned int i = devMan->GetNODevicesConnected();
+	
+	if (i < 1)
 	{
-		std::cout << "Aligning depth to RGB is supported with device." << std::endl;
-		XnStatus res = depthG.GetAlternativeViewPointCap().SetViewPoint(imageG);
-		if (XN_STATUS_OK != res)
-			printf("Setting alternative viewpoint for depth failed: %s\n", xnGetStatusString(res));
+		std::cout << "No devices found." << std::endl;
+		return -1;
 	}
-
-	context.StartGeneratingAll();
-
-	//XnUInt32 nMiddleIndex = ((640*480)/2)+(640/2);
-
+	
+	printf("Number of devices connected: %d.\n", i);
+	
 	//VTK Pipeline
-	polyData = vtkSmartPointer<vtkPolyData>::New();
-	vtkSmartPointer<vtkPolyDataMapper> mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
-	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
 	vtkSmartPointer<vtkRenderer> ren = vtkSmartPointer<vtkRenderer>::New();
 	renwin = vtkSmartPointer<vtkRenderWindow>::New();
 	vtkSmartPointer<vtkRenderWindowInteractor> iren = vtkSmartPointer<vtkRenderWindowInteractor>::New();
 
-	mapper->SetInput(polyData);
-	actor->SetMapper(mapper);
-	ren->AddActor(actor);
 	renwin->AddRenderer(ren);
 	renwin->SetInteractor(iren);
 	renwin->SetSize(1280,800);
@@ -134,11 +140,10 @@ int main(int argc, char** argv)
 	vtkSmartPointer<UpdateData> updateCallback = vtkSmartPointer<UpdateData>::New();
 	iren->AddObserver(vtkCommand::TimerEvent, updateCallback);
 	iren->CreateRepeatingTimer(100);
-
-	context.WaitOneUpdateAll(depthG);
-	const XnDepthPixel* pDepthMap = depthG.GetDepthMap();
-	const XnRGB24Pixel* pImageMap = imageG.GetRGB24ImageMap();
-	updatePolyData(pDepthMap, pImageMap);
+	
+	//devMan->GetCameraDataByDeviceIndex(0, &dataPacket);
+	devMan->GetCameraDataForAllDevices(cameraDataVector);
+	updatePolyData();
 
 	//Set up camera
 	ren->ResetCamera();
@@ -147,6 +152,8 @@ int main(int argc, char** argv)
 	ren->GetActiveCamera()->Zoom(2.0);
 
 	iren->Start();
-
-	context.Shutdown();
+	
+	delete devMan;
+	
+	return 0;
 }
